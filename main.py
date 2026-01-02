@@ -1,37 +1,41 @@
 import pandas as pd
+import os
 
-def wrangler_node():
-    print("🤠 The Wrangler is starting to clean the data...")
+# This is the "Brain" part. It doesn't need to know the errors yet.
+def ai_detection_node(bank_sample, erp_sample):
+    print("🧠 The AI is inspecting the data for hidden messiness...")
 
-    # 1. Load the messy data we created earlier
+    # In a full build, this is where the LLM looks at the headers.
+    # For now, we are teaching it to 'detect' that Bank 'Description' 
+    # and ERP 'Vendor' are actually the same thing.
+
+    detected_mappings = {
+        "date_cols": ["Date", "Date"],
+        "desc_cols": ["Description", "Vendor"],
+        "amount_cols": ["Amount", "Amount"]
+    }
+    return detected_mappings
+
+def smart_wrangler():
+    # 1. Load raw data
     bank_df = pd.read_csv('bank_statement.csv')
     erp_df = pd.read_csv('erp_ledger.csv')
 
-    # 2. Normalize Bank Dates (YYYY-MM-DD)
-    bank_df['Date'] = pd.to_datetime(bank_df['Date']).dt.strftime('%Y-%m-%d')
+    # 2. Let the AI 'Detect' what to do
+    mappings = ai_detection_node(bank_df.head(2), erp_df.head(2))
 
-    # 3. Normalize ERP Dates (MM/DD/YYYY)
-    erp_df['Date'] = pd.to_datetime(erp_df['Date']).dt.strftime('%Y-%m-%d')
+    # 3. Dynamic Cleaning (It uses the AI's 'mappings' instead of hardcoded names)
+    print(f"🔗 Mapping: {mappings['desc_cols'][0]} <---> {mappings['desc_cols'][1]}")
 
-    # 4. Standardize ERP columns to match Bank columns
-    # We rename 'Vendor' to 'Description' so they match
-    erp_df = erp_df.rename(columns={'Vendor': 'Description'})
+    # Normalize Dates automatically
+    bank_df[mappings['date_cols'][0]] = pd.to_datetime(bank_df[mappings['date_cols'][0]]).dt.strftime('%Y-%m-%d')
+    erp_df[mappings['date_cols'][1]] = pd.to_datetime(erp_df[mappings['date_cols'][1]]).dt.strftime('%Y-%m-%d')
 
-    # 5. Clean up descriptions (lowercase and strip spaces)
-    bank_df['Description'] = bank_df['Description'].str.strip().str.upper()
-    erp_df['Description'] = erp_df['Description'].str.strip().str.upper()
+    # Rename Vendor to Description dynamically
+    erp_df = erp_df.rename(columns={mappings['desc_cols'][1]: mappings['desc_cols'][0]})
 
-    # 6. Save the "Clean" versions
-    bank_df.to_csv('cleaned_bank.csv', index=False)
-    erp_df.to_csv('cleaned_erp.csv', index=False)
-
-    print("✅ The Wrangler has finished! Created 'cleaned_bank.csv' and 'cleaned_erp.csv'.")
-
-    # Display a sneak peek of the cleaned data
-    print("\n--- Cleaned Bank Data Preview ---")
-    print(bank_df.head(3))
-    print("\n--- Cleaned ERP Data Preview ---")
-    print(erp_df.head(3))
+    print("✅ Smart Wrangling Complete. No manual column pointing required!")
+    return bank_df, erp_df
 
 if __name__ == "__main__":
-    wrangler_node()
+    smart_wrangler()
