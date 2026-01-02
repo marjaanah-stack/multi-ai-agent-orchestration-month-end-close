@@ -1,68 +1,55 @@
 import os
 import pandas as pd
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage
+from typing import TypedDict, List
+from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.postgres import PostgresSaver
+from psycopg_pool import ConnectionPool
 
-# 1. Initialize the Brain
-llm = ChatOpenAI(model="gpt-4o", api_key=os.environ.get("OPENAI_API_KEY"))
+# 1. Define the "Memory" structure
+class AgentState(TypedDict):
+    bank_data: list
+    erp_data: list
+    matches: list
+    unmatched_count: int
 
-def matchmaker_node(bank_row, erp_df):
-    """
-    This node tries to match ONE bank transaction against the entire ERP.
-    """
-    print(f"🔍 Analyzing: {bank_row['Description']} (${bank_row['Amount']})")
+# 2. The Logic for our Matchmaker Node
+def matchmaker_node(state: AgentState):
+    print("🤖 Matchmaker is processing...")
+    bank_df = pd.DataFrame(state['bank_data'])
+    erp_df = pd.DataFrame(state['erp_data'])
 
-    # --- Strategy A: Exact Match (Deterministic) ---
-    # First, we check if the amount and description match exactly.
-    exact_match = erp_df[
-        (erp_df['Amount'] == bank_row['Amount']) & 
-        (erp_df['Description'] == bank_row['Description'])
-    ]
-
-    if not exact_match.empty:
-        return {"match_type": "EXACT", "data": exact_match.iloc[0].to_dict()}
-
-    # --- Strategy B: The Brain (LLM Fuzzy Match) ---
-    # If Strategy A fails, we ask the AI to look for "likely" matches.
-    potential_vendors = erp_df['Description'].unique().tolist()
-
-    prompt = f"""
-    Bank Description: {bank_row['Description']}
-    ERP Vendor List: {potential_vendors}
-
-    Is one of these ERP vendors likely the same as the bank description? 
-    Answer ONLY with the vendor name or 'NONE'.
-    """
-
-    ai_response = llm.invoke([HumanMessage(content=prompt)]).content.strip()
-
-    if ai_response in potential_vendors:
-        matched_row = erp_df[erp_df['Description'] == ai_response].iloc[0]
-        return {"match_type": "FUZZY (AI)", "data": matched_row.to_dict()}
-
-    return {"match_type": "UNMATCHED", "data": None}
-
-def run_reconciliation():
-    # Load our cleaned data
-    bank_df = pd.read_csv('cleaned_bank.csv')
-    erp_df = pd.read_csv('cleaned_erp.csv')
-
-    results = []
+    current_matches = []
+    unmatched = 0
 
     for _, row in bank_df.iterrows():
-        match_result = matchmaker_node(row, erp_df)
-        results.append({
-            "Bank_Desc": row['Description'],
-            "Amount": row['Amount'],
-            "Status": match_result['match_type'],
-            "Matched_To": match_result['data']['Description'] if match_result['data'] else "N/A"
-        })
+        # Simple logic: If Amount matches exactly, we call it a win for now
+        # (In the next step, we'll re-add the LLM brain here)
+        match = erp_df[erp_df['Amount'] == row['Amount']]
 
-    # Show the results
-    report = pd.DataFrame(results)
-    print("\n--- RECONCILIATION REPORT ---")
-    print(report)
-    report.to_csv('recon_report.csv', index=False)
+        if not match.empty:
+            current_matches.append({"bank": row['Description'], "status": "MATCHED"})
+        else:
+            current_matches.append({"bank": row['Description'], "status": "UNMATCHED"})
+            unmatched += 1
 
-if __name__ == "__main__":
-    run_reconciliation()
+    return {"matches": current_matches, "unmatched_count": unmatched}
+
+# 3. Setup the Graph with Database Memory
+DB_URI = os.environ.get("DATABASE_URL")
+
+# We use a "Connection Pool" so the database doesn't get overwhelmed
+pool = ConnectionPool(conninfo=DB_URI, max_size=20)
+checkpointer = PostgresSaver(pool)
+
+# 4. Build the Workflow
+workflow = StateGraph(AgentState)
+workflow.add_node("matchmaker", matchmaker_node)
+workflow.set_entry_point("matchmaker")
+
+# Logic: If there are unmatched items, go to a "Human Review" node (which we'll build next)
+workflow.add_edge("matchmaker", END)
+
+# Compile the graph with memory!
+app = workflow.compile(checkpointer=checkpointer)
+
+print("✅ Stateful Graph is ready with Supabase memory.")
