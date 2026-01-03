@@ -1,6 +1,7 @@
 modules = ["python-3.11"]
 [agent]
 expertMode = true
+integrations = ["python_openai_ai_integrations:1.0.0"]
 
 [workflows]
 runButton = "Project"
@@ -28,7 +29,7 @@ waitForPort = 5000
 
 [nix]
 channel = "stable-25_05"
-packages = ["glibcLocales"]
+packages = ["glibcLocales", "postgresql"]
 
 [[ports]]
 localPort = 5000
