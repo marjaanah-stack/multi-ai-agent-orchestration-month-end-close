@@ -121,4 +121,7 @@ if __name__ == "__main__":
     Thread(target=run_initial_reconciliation, daemon=True).start()
 if __name__ == "__main__":
     # This line tells the server to use Port 5000 specifically
-    uvicorn.run(api, host="0.0.0.0", port=5000)
+    if __name__ == "__main__":
+        print("🚀 STARTING SERVER ON PORT 5000...")
+        import uvicorn
+        uvicorn.run(api, host="0.0.0.0", port=5000)
