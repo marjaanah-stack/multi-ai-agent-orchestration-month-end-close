@@ -29,6 +29,8 @@ class AgentState(TypedDict):
     unmatched_items: list
     ai_suggestion: str
     button_options: list
+    user_choice: str
+    audit_result: dict
 
 def matchmaker_node(state: AgentState):
     print("🤖 Matchmaker is running...")
@@ -99,8 +101,17 @@ The top_categories must contain exactly 2 category names from the provided list,
     content = response.choices[0].message.content
     print(f"💡 Raw AI Response: {content}")
     
+    clean_content = content.strip()
+    if clean_content.startswith("```json"):
+        clean_content = clean_content[7:]
+    if clean_content.startswith("```"):
+        clean_content = clean_content[3:]
+    if clean_content.endswith("```"):
+        clean_content = clean_content[:-3]
+    clean_content = clean_content.strip()
+    
     try:
-        parsed = json.loads(content)
+        parsed = json.loads(clean_content)
         ai_suggestion = parsed.get("reasoning", content)
         button_options = parsed.get("top_categories", categories[:2])
     except json.JSONDecodeError:
@@ -112,10 +123,62 @@ The top_categories must contain exactly 2 category names from the provided list,
     
     return {"ai_suggestion": ai_suggestion, "button_options": button_options}
 
+def save_reconciled_transaction(desc, amount, category, status, audit_flags):
+    with psycopg.connect(DB_URI) as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO reconciled_transactions (description, amount, category, status, audit_flags)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (desc, amount, category, status, audit_flags))
+            conn.commit()
+
+def auditor_node(state: AgentState):
+    print("🔎 Auditor is verifying the decision...")
+    user_choice = state.get('user_choice', '')
+    unmatched = state.get('unmatched_items', [])
+    
+    audit_results = []
+    
+    for item in unmatched:
+        desc = item['desc']
+        amount = float(item['amount'])
+        flags = []
+        status = 'RECONCILED'
+        
+        if abs(amount) > 5000:
+            flags.append('MATERIALITY: Requires Secondary Sign-off (amount > $5,000)')
+            status = 'PENDING_SECONDARY_SIGNOFF'
+            print(f"⚠️ MATERIALITY FLAG: {desc} (${amount}) requires secondary sign-off")
+        
+        if user_choice == 'Interest Income' and amount < 0:
+            flags.append('LOGIC ERROR: Interest Income cannot be negative')
+            status = 'LOGIC_ERROR'
+            print(f"❌ LOGIC ERROR: {desc} - Interest Income selected but amount is negative (${amount})")
+        
+        audit_flag_str = '; '.join(flags) if flags else None
+        
+        if status == 'RECONCILED':
+            save_reconciled_transaction(desc, amount, user_choice, status, audit_flag_str)
+            print(f"✅ RECONCILED: {desc} -> {user_choice}")
+        else:
+            save_reconciled_transaction(desc, amount, user_choice, status, audit_flag_str)
+            print(f"🚩 FLAGGED: {desc} -> {status}")
+        
+        audit_results.append({
+            "description": desc,
+            "amount": amount,
+            "category": user_choice,
+            "status": status,
+            "flags": flags
+        })
+    
+    return {"audit_result": {"items": audit_results, "total_processed": len(audit_results)}}
+
 workflow = StateGraph(AgentState)
 workflow.add_node("matchmaker", matchmaker_node)
 workflow.add_node("investigator", investigator_node)
 workflow.add_node("human_review", human_review_node)
+workflow.add_node("auditor", auditor_node)
 workflow.set_entry_point("matchmaker")
 workflow.add_conditional_edges(
     "matchmaker",
@@ -126,7 +189,8 @@ workflow.add_conditional_edges(
     }
 )
 workflow.add_edge("investigator", "human_review")
-workflow.add_edge("human_review", END)
+workflow.add_edge("human_review", "auditor")
+workflow.add_edge("auditor", END)
 
 app = workflow.compile(checkpointer=checkpointer, interrupt_before=["human_review"])
 print("✅ Graph Compiled with 'Human-in-the-Loop' safety trigger.")
@@ -167,6 +231,31 @@ def run_reconciliation():
     if state.next:
         return {"status": "PAUSED", "at_node": state.next, "nodes_processed": results}
     return {"status": "COMPLETE", "nodes_processed": results}
+
+@api.post("/submit-choice")
+def submit_choice(category: str):
+    config = {"configurable": {"thread_id": "DEC_2025_RECON"}}
+    
+    state = app.get_state(config)
+    if not state.next:
+        return {"error": "No pending review. The graph is not paused."}
+    
+    print(f"📥 Received user choice from n8n: {category}")
+    
+    app.update_state(config, {"user_choice": category})
+    
+    results = []
+    for event in app.stream(None, config):
+        results.append(list(event.keys())[0])
+    
+    final_state = app.get_state(config)
+    audit_result = final_state.values.get("audit_result", {})
+    
+    return {
+        "status": "COMPLETE",
+        "nodes_processed": results,
+        "audit_result": audit_result
+    }
 
 def run_initial_reconciliation():
     bank_list = pd.read_csv('bank_statement.csv').to_dict('records')
