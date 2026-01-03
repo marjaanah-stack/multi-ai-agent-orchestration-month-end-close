@@ -28,6 +28,7 @@ class AgentState(TypedDict):
     matches: list
     unmatched_items: list
     ai_suggestion: str
+    button_options: list
 
 def matchmaker_node(state: AgentState):
     print("🤖 Matchmaker is running...")
@@ -66,13 +67,14 @@ def get_categories_from_db():
             return [row[0] for row in cur.fetchall()]
 
 def investigator_node(state: AgentState):
+    import json
     print("🔍 Investigator is analyzing unmatched items...")
     categories = get_categories_from_db()
     print(f"📋 Loaded {len(categories)} categories from database: {categories}")
     unmatched = state.get('unmatched_items', [])
     
     if not unmatched:
-        return {"ai_suggestion": "No unmatched items to categorize."}
+        return {"ai_suggestion": "No unmatched items to categorize.", "button_options": []}
     
     items_text = "\n".join([f"- {item['desc']}: ${item['amount']}" for item in unmatched])
     
@@ -81,17 +83,34 @@ def investigator_node(state: AgentState):
 Unmatched transactions:
 {items_text}
 
-For each transaction, provide your suggested category and a brief reason. Format your response clearly."""
+You must respond with valid JSON in this exact format:
+{{
+    "reasoning": "Your detailed analysis explaining why you chose these categories",
+    "top_categories": ["First Best Category", "Second Best Category"]
+}}
+
+The top_categories must contain exactly 2 category names from the provided list, ordered by how well they match the transaction. Choose the most relevant categories based on the transaction description."""
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}]
     )
     
-    suggestion = response.choices[0].message.content
-    print(f"💡 AI Suggestion: {suggestion}")
+    content = response.choices[0].message.content
+    print(f"💡 Raw AI Response: {content}")
     
-    return {"ai_suggestion": suggestion}
+    try:
+        parsed = json.loads(content)
+        ai_suggestion = parsed.get("reasoning", content)
+        button_options = parsed.get("top_categories", categories[:2])
+    except json.JSONDecodeError:
+        ai_suggestion = content
+        button_options = categories[:2]
+    
+    print(f"📝 AI Suggestion: {ai_suggestion}")
+    print(f"🔘 Button Options: {button_options}")
+    
+    return {"ai_suggestion": ai_suggestion, "button_options": button_options}
 
 workflow = StateGraph(AgentState)
 workflow.add_node("matchmaker", matchmaker_node)
@@ -127,7 +146,9 @@ def check_status():
         return {
             "status": "PAUSED",
             "at_node": state.next,
-            "unmatched_items": state.values.get("unmatched_items", [])
+            "unmatched_items": state.values.get("unmatched_items", []),
+            "ai_suggestion": state.values.get("ai_suggestion", ""),
+            "button_options": state.values.get("button_options", [])
         }
     return {"status": "RUNNING_OR_COMPLETE"}
 
