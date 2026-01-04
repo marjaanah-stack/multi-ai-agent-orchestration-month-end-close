@@ -32,22 +32,38 @@ class AgentState(TypedDict):
     user_choice: str
     audit_result: dict
 
+def get_reconciled_descriptions():
+    with psycopg.connect(DB_URI) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT description FROM reconciled_transactions")
+            return [row[0] for row in cur.fetchall()]
+
 def matchmaker_node(state: AgentState):
     print("🤖 Matchmaker is running...")
     bank_df = pd.DataFrame(state['bank_data'])
     erp_df = pd.DataFrame(state['erp_data'])
+    
+    already_reconciled = get_reconciled_descriptions()
+    print(f"📋 Already reconciled: {already_reconciled}")
 
     current_matches = []
     current_unmatched = []
 
     for _, row in bank_df.iterrows():
+        desc = row['Description']
+        
+        if desc in already_reconciled:
+            print(f"⏭️ Skipping '{desc}' - already reconciled")
+            continue
+        
         match = erp_df[erp_df['Amount'] == row['Amount']]
 
         if not match.empty:
-            current_matches.append({"desc": row['Description'], "amount": row['Amount'], "status": "MATCHED"})
+            current_matches.append({"desc": desc, "amount": row['Amount'], "status": "MATCHED"})
         else:
-            current_unmatched.append({"desc": row['Description'], "amount": row['Amount']})
+            current_unmatched.append({"desc": desc, "amount": row['Amount']})
 
+    print(f"📊 Found {len(current_unmatched)} unmatched items to process")
     return {
         "matches": current_matches, 
         "unmatched_items": current_unmatched
