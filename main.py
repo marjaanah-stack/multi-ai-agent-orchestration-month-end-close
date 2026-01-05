@@ -88,13 +88,18 @@ def send_to_slack(item, ai_suggestion, button_options):
         "button_options": button_options
     }
     
+    print(f"📤 Attempting to send to: {webhook_url}")
+    print(f"📦 Payload: {payload}")
+    
     try:
         response = requests.post(webhook_url, json=payload, timeout=10)
+        print(f"📬 n8n Response Status: {response.status_code}")
+        
         if response.status_code == 200:
             print("✅ SENT TO SLACK")
             return True
         else:
-            print(f"❌ Slack webhook failed: {response.status_code}")
+            print(f"❌ n8n Error Response: {response.text}")
             return False
     except Exception as e:
         print(f"❌ Slack webhook error: {e}")
