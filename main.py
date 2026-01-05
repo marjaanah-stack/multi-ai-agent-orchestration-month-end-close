@@ -50,29 +50,20 @@ def update_bank_statement_status(description, new_status):
 
 def matchmaker_node(state: AgentState):
     print("🤖 Matchmaker is running...")
-    erp_df = pd.DataFrame(state['erp_data'])
     
     unmatched_rows = get_unmatched_from_db()
     print(f"📋 Found {len(unmatched_rows)} UNMATCHED rows in bank_statement")
 
-    current_matches = []
-    current_unmatched = []
-
-    for item in unmatched_rows:
-        desc = item['desc']
-        amount = item['amount']
-        
-        match = erp_df[erp_df['Amount'] == amount]
-
-        if not match.empty:
-            current_matches.append({"desc": desc, "amount": amount, "status": "MATCHED"})
-        else:
-            current_unmatched.append({"id": item['id'], "desc": desc, "amount": amount})
-
-    print(f"📊 Found {len(current_unmatched)} unmatched items to process")
+    if not unmatched_rows:
+        print("🏁 All items have been processed!")
+        return {"matches": [], "unmatched_items": []}
+    
+    first_item = unmatched_rows[0]
+    print(f"➡️ Processing: '{first_item['desc']}' (${first_item['amount']})")
+    
     return {
-        "matches": current_matches, 
-        "unmatched_items": current_unmatched
+        "matches": [], 
+        "unmatched_items": [first_item]
     }
 
 def should_continue(state: AgentState):
@@ -198,14 +189,16 @@ def auditor_node(state: AgentState):
         "flags": flags
     }
     
-    if remaining_unmatched:
-        print(f"🔄 {len(remaining_unmatched)} more items to review. Looping back to Investigator...")
+    remaining_in_db = get_unmatched_from_db()
+    
+    if remaining_in_db:
+        print(f"🔄 {len(remaining_in_db)} more UNMATCHED items in database. Looping back to Matchmaker...")
     else:
-        print("🏁 All unmatched items have been processed!")
+        print("🏁 All items have been processed!")
     
     return {
-        "audit_result": {"item": audit_result, "remaining": len(remaining_unmatched)},
-        "unmatched_items": remaining_unmatched,
+        "audit_result": {"item": audit_result, "remaining": len(remaining_in_db)},
+        "unmatched_items": remaining_in_db,
         "user_choice": "",
         "ai_suggestion": "",
         "button_options": []
