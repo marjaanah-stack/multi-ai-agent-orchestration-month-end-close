@@ -107,14 +107,6 @@ def send_to_slack(item, ai_suggestion, button_options):
 
 def human_review_node(state: AgentState):
     print("⏸️ PAUSED: Waiting for Maaja to review unmatched items in Slack...")
-    
-    unmatched = state.get('unmatched_items', [])
-    ai_suggestion = state.get('ai_suggestion', '')
-    button_options = state.get('button_options', [])
-    
-    if unmatched:
-        send_to_slack(unmatched[0], ai_suggestion, button_options)
-    
     return state
 
 def get_categories_from_db():
@@ -175,6 +167,11 @@ The top_categories must contain exactly 2 category names from the provided list,
     
     print(f"📝 AI Suggestion: {ai_suggestion}")
     print(f"🔘 Button Options: {button_options}")
+    
+    if unmatched:
+        success = send_to_slack(unmatched[0], ai_suggestion, button_options)
+        if not success:
+            print("🚨 CRITICAL: Failed to send to Slack. Check n8n webhook configuration.")
     
     return {"ai_suggestion": ai_suggestion, "button_options": button_options}
 
