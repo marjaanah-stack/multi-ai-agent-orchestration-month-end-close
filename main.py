@@ -426,5 +426,5 @@ def run_initial_reconciliation():
 
 if __name__ == "__main__":
     print("🚀 STARTING SERVER ON PORT 5000...")
-    print("⏸️ Matchmaker NOT started. Use POST /run-reconciliation to trigger manually.")
+    Thread(target=run_initial_reconciliation, daemon=True).start()
     uvicorn.run(api, host="0.0.0.0", port=5000)
