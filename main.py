@@ -83,9 +83,10 @@ def send_to_slack(item, ai_suggestion, button_options):
     
     desc = quote(str(item.get("desc", "Unknown")))
     amt = item.get("amount", 0)
-    cat = quote(button_options[0] if len(button_options) > 0 else "")
+    suggestion = quote(str(ai_suggestion)[:200])
+    options = quote(",".join(button_options))
     
-    full_url = f"{webhook_url}?description={desc}&amount={amt}&category={cat}"
+    full_url = f"{webhook_url}?description={desc}&amount={amt}&ai_suggestion={suggestion}&button_options={options}"
     
     print(f"📤 FULL FINAL URL: {full_url}")
     
