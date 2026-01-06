@@ -1,4 +1,4 @@
-# 🏦 Agentic Finance: Multi-Agent Month-End Reconciliation Mesh
+# 🏦 AI Agentic Finance: Multi-Agent Month-End Reconciliation Mesh
 ### *Autonomous Concurrent Orchestration for Modern Fintech & Energy Tech Ledgers*
 
 ![Project Architecture](images/header_banner.png)
